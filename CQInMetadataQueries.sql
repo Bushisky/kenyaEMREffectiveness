@@ -78,6 +78,7 @@ order by requested_by desc;
 select distinct
 	(select value_reference from location_attribute where location_id = (select property_value from global_property where property = 'kenyaemr.defaultLocation')) as MFL_CODE,
 	(select name from location where location_id = (select property_value from global_property where property = 'kenyaemr.defaultLocation')) as Facility_Name,
+	pi.identifier as patient,
 	f.name as Form_type,
 	e.date_created as form_creation_time,
 	e.date_changed as last_saving_time,
@@ -92,6 +93,7 @@ from encounter e
 	inner join user_role ur on ur.user_id=e.creator
 	inner join encounter_type et on et.encounter_type_id = e.encounter_type
 	inner join form f on e.form_id = f.form_id
+	left outer join patient_identifier pi on pi.patient_id=e.patient_id and pi.identifier_type =3 and pi.voided=0
 	inner join (select user_id, group_concat(role) as roles from user_role group by user_id) urole on urole.user_id = e.creator
 	left outer join (
 	select 
@@ -103,7 +105,7 @@ from obs o
 where o.concept_id in (160555,159599,160554) and o.voided=0
 group by o.encounter_id
 ) ov on ov.encounter_id = e.encounter_id
-where e.encounter_type = 5 and e.voided =0 
+where e.encounter_type = 4 and e.voided =0 
 order by e.encounter_datetime;
 
 
@@ -118,7 +120,69 @@ select distinct
 	(select value_reference from location_attribute where location_id = (select property_value from global_property where property = 'kenyaemr.defaultLocation')) as MFL_CODE,
 	(select name from location where location_id = (select property_value from global_property where property = 'kenyaemr.defaultLocation')) as Facility_Name,
 	f.name as Form_type,
-	e.patient_id,
+	pi.identifier as patient,
+	e.encounter_id,
+	date(e.encounter_datetime) as visitDate,
+	e.date_created as form_creation_time,
+	u.username as creatorLogin,
+	urole.roles as roles,
+	if(ov.Weight=1,'Yes','No') as Weight,
+	if(ov.Height=1,'Yes','No') as Height,
+	if(ov.Temperature=1,'Yes','No') as Temperature,
+	if(ov.CD4=1,'Yes','No') as CD4,
+	if(ov.CD4_percent=1,'Yes','No') as CD4_percent,
+	if(ov.ViralLoad=1,'Yes','No') as ViralLoad,
+	if(ov.PCR=1,'Yes','No') as Hiv_DNA_PCR,
+	if(ov.Hemoglobin=1,'Yes','No') as Hemoglobin,
+	drugs.drug as drug,
+	drugs.duration as duration,
+	drugs.unit as unit
+from encounter e 
+	-- inner join obs o on o.encounter_id=e.encounter_id and o.voided=0
+	inner join users u on u.user_id=e.creator
+	inner join user_role ur on ur.user_id=e.creator
+	inner join encounter_type et on et.encounter_type_id = e.encounter_type and et.retired =0
+	inner join form f on e.form_id = f.form_id
+	left outer join patient_identifier pi on pi.patient_id=e.patient_id and pi.identifier_type =3 and pi.voided=0
+	inner join (select user_id, group_concat(role) as roles from user_role group by user_id) urole on urole.user_id = e.creator
+	left outer join (
+		select 
+			o.person_id,
+			o.encounter_id,
+			max(if(o.concept_id = 1282, cs.concept_set, null)) as drug,
+			max(if(o.concept_id = 159368, o.value_numeric, null)) as duration,
+			max(if(o.concept_id = 1732, o.value_coded, null)) as unit
+		from obs o
+		left outer join concept_set cs on o.value_coded = cs.concept_id 
+		where o.voided=0 and o.concept_id in(1282,1732,159368) 
+		group by encounter_id
+		having drug is not null
+	) drugs on drugs.encounter_id = e.encounter_id
+	left outer join (
+		select 
+			o.encounter_id,
+			max(if(o.concept_id = 5089 and o.value_numeric is not null, 1, 0)) as Weight,
+			max(if(o.concept_id = 5085 and o.value_numeric is not null, 1, 0)) as Pressure,
+			max(if(o.concept_id = 5090 and o.value_numeric is not null, 1, 0)) as Height,
+			max(if(o.concept_id = 5088 and o.value_numeric is not null, 1, 0)) as Temperature,
+			max(if(o.concept_id = 5497 and o.value_numeric is not null, 1, 0)) as CD4,
+			max(if(o.concept_id = 730 and o.value_numeric is not null, 1, 0)) as CD4_percent,
+			max(if(o.concept_id = 856 and o.value_numeric is not null, 1, 0)) as ViralLoad,
+			max(if(o.concept_id = 1030 and o.value_coded is not null, 1, 0)) as PCR,
+			max(if(o.concept_id = 21 and o.value_numeric is not null, 1, 0)) as Hemoglobin
+		from obs o 
+		where o.concept_id in (21,1030,856,730,5497,5088,5090,5085,5089) and o.voided=0
+		group by o.encounter_id
+	) ov on ov.encounter_id = e.encounter_id
+where e.voided =0 
+order by encounter_datetime;
+
+-- alternate query
+select distinct
+	(select value_reference from location_attribute where location_id = (select property_value from global_property where property = 'kenyaemr.defaultLocation')) as MFL_CODE,
+	(select name from location where location_id = (select property_value from global_property where property = 'kenyaemr.defaultLocation')) as Facility_Name,
+	f.name as Form_type,
+	pi.identifier as patient,
 	e.encounter_id,
 	date(e.encounter_datetime) as visitDate,
 	e.date_created as form_creation_time,
@@ -132,32 +196,39 @@ select distinct
 	if(ov.ViralLoad=1,'Yes','No') as ViralLoad,
 	if(ov.PCR=1,'Yes','No') as Hiv_DNA_PCR,
 	if(ov.Hemoglobin=1,'Yes','No') as Hemoglobin
+	-- ov.drug as drug,
+	-- ov.duration as duration,
+	-- ov.unit as unit
 from encounter e 
 	-- inner join obs o on o.encounter_id=e.encounter_id and o.voided=0
 	inner join users u on u.user_id=e.creator
 	inner join user_role ur on ur.user_id=e.creator
 	inner join encounter_type et on et.encounter_type_id = e.encounter_type and et.retired =0
 	inner join form f on e.form_id = f.form_id
+	left outer join patient_identifier pi on pi.patient_id=e.patient_id and pi.identifier_type =3 and pi.voided=0
 	inner join (select user_id, group_concat(role) as roles from user_role group by user_id) urole on urole.user_id = e.creator
 	left outer join (
-	select 
-	o.encounter_id,
-	max(if(o.concept_id = 5089 and o.value_numeric is not null, 1, 0)) as Weight,
-	max(if(o.concept_id = 5085 and o.value_numeric is not null, 1, 0)) as Pressure,
-	max(if(o.concept_id = 5090 and o.value_numeric is not null, 1, 0)) as Height,
-	max(if(o.concept_id = 5088 and o.value_numeric is not null, 1, 0)) as Temperature,
-	max(if(o.concept_id = 5497 and o.value_numeric is not null, 1, 0)) as CD4,
-	max(if(o.concept_id = 730 and o.value_numeric is not null, 1, 0)) as CD4_percent,
-	max(if(o.concept_id = 856 and o.value_numeric is not null, 1, 0)) as ViralLoad,
-	max(if(o.concept_id = 1030 and o.value_coded is not null, 1, 0)) as PCR,
-	max(if(o.concept_id = 21 and o.value_numeric is not null, 1, 0)) as Hemoglobin
-from obs o 
-where o.concept_id in (21,1030,856,730,5497,5088,5090,5085,5089) and o.voided=0
-group by o.encounter_id
-) ov on ov.encounter_id = e.encounter_id
-where e.voided =0 
-order by encounter_datetime;
-
+		select 
+			o.encounter_id,
+			max(if(o.concept_id = 5089 and o.value_numeric is not null, 1, 0)) as Weight,
+			max(if(o.concept_id = 5085 and o.value_numeric is not null, 1, 0)) as Pressure,
+			max(if(o.concept_id = 5090 and o.value_numeric is not null, 1, 0)) as Height,
+			max(if(o.concept_id = 5088 and o.value_numeric is not null, 1, 0)) as Temperature,
+			max(if(o.concept_id = 5497 and o.value_numeric is not null, 1, 0)) as CD4,
+			max(if(o.concept_id = 730 and o.value_numeric is not null, 1, 0)) as CD4_percent,
+			max(if(o.concept_id = 856 and o.value_numeric is not null, 1, 0)) as ViralLoad,
+			max(if(o.concept_id = 1030 and o.value_coded is not null, 1, 0)) as PCR,
+			max(if(o.concept_id = 21 and o.value_numeric is not null, 1, 0)) as Hemoglobin
+			-- max(if(o.concept_id = 1282, cs.concept_set, null)) as drug,
+			-- max(if(o.concept_id = 159368, o.value_numeric, null)) as duration,
+			-- max(if(o.concept_id = 1732, o.value_coded, null)) as unit
+		from obs o 
+		-- left outer join concept_set cs on o.value_coded = cs.concept_id
+		where o.concept_id in (21,1030,856,730,5497,5088,5090,5085,5089) and o.voided=0
+		group by o.encounter_id
+	) ov on ov.encounter_id = e.encounter_id
+where e.voided =0 and e.encounter_type in (4,5,8,9,11)
+order by e.patient_id, e.encounter_datetime;
 
 -- =====================================================================================================================================================
 --  		||||||| completed query for patients with nutritional assessment in their last visit ||||||||||||||

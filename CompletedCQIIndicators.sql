@@ -259,12 +259,13 @@ select
 select count(distinct patient) from (
 select distinct
 	o.person_id as patient,
+	p.birthdate as dob,
 	o.value_numeric as val,
-	
 	o.obs_datetime as encDate,
 	active_status.date_died as date_died,
 	active_status.to_date as to_date
 from obs o
+inner join person p on p.person_id=o.person_id and p.voided=0
 left outer join (
 -- subquery to transfer out and death status
 select 
@@ -280,7 +281,8 @@ where o.voided=0 and o.concept_id in (5497, 730)
 group by patient, encDate
 ) cd4
 where cd4.encDate between startDate and endDate and (cd4.date_died is null or cd4.date_died='' or cd4.date_died > endDate)
-and (cd4.to_date is null or cd4.to_date='' or cd4.to_date > endDate) -- date_died must be after reporting period
+	and (cd4.to_date is null or cd4.to_date='' or cd4.to_date > endDate) -- date_died must be after reporting period
+	-- and datediff(endDate, cd4.dob) div 365.25 >= 15
 ) as monthTotal
 from encounter e
 where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
@@ -409,11 +411,13 @@ select
 select count(distinct patient) from (
 select distinct
 	o.person_id as patient,
+	p.birthdate as dob,
 	o.value_numeric as val,
 	o.obs_datetime as encDate,
 	active_status.date_died as date_died,
 	active_status.to_date as to_date
 from obs o
+inner join person p on p.person_id=o.person_id and p.voided=0
 left outer join (
 -- subquery to transfer out and death status
 select 
@@ -429,7 +433,8 @@ where o.voided=0 and o.concept_id = 856
 group by patient, encDate
 ) vl
 where vl.encDate between startDate and endDate and (vl.date_died is null or vl.date_died='' or vl.date_died > endDate)
-and (vl.to_date is null or vl.to_date='' or vl.to_date > endDate) -- date_died must be after reporting period
+	and (vl.to_date is null or vl.to_date='' or vl.to_date > endDate) -- date_died must be after reporting period
+	-- and datediff(endDate, vl.dob) div 365.25 >= 15
 ) as monthTotal
 from encounter e
 where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
