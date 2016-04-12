@@ -1,8 +1,9 @@
--- =============================================================================================================================================================
--- 				|||	Completed query for Enrollments in Care 
+select *
+from dates y
 
--- =============================================================================================================================================================
-select 'indicator 1' as ind, date_format(enroll_date, '%Y-%m') as cohort_month,
+-- first join
+
+left outer join (select 'indicator 1' as ind, date_format(enroll_date, '%Y-%m') as cohort_month,
 LAST_DAY(enroll_date) as endDate,
 -- pmtct
 count(if(gender='F' and timestampdiff(year,birthdate, enroll_date) <=14 and entry_point_text ='PMTCT',person_id,null)) as 'K1-1-FP',
@@ -73,12 +74,11 @@ join person p on p.person_id=o.person_id and p.voided=0
 where o.concept_id in (160540,160534) and o.voided=0 -- and o.value_coded not in (160563) -- ignore TIs
 group by o.person_id) x
 group by year(enroll_date), month(enroll_date) 
-order by year(enroll_date), month(enroll_date);
+order by year(enroll_date), month(enroll_date)) a using (endDate)
 
--- ============================================================================
--- Cummulative enrollments
--- ============================================================================
-select endDate,
+-- next join
+
+left outer join (select endDate,
 'indicator 2' as ind,
 -- sub totals
 count(distinct if(gender='F' and timestampdiff(year,birthdate, enroll_date) <=14,person_id,null)) as 'K2-FP',
@@ -111,40 +111,11 @@ from obs o
 join person p on p.person_id=o.person_id and p.voided=0
 where o.concept_id in (160540,160534) and o.voided=0 -- and o.value_coded not in (160563) -- ignore TIs
 group by o.person_id) t2 on t2.enroll_date <=endDate
-group by endDate
--- ============== End of the Query ============================================
+group by endDate) b using (endDate)
 
--- ==================================== End of enrollments query ==============
--- get Patient WHO stage function 
--- ============================================================================
-CREATE DEFINER=`root`@`localhost` FUNCTION `getWhoStage`(patient_id integer, endDate Date) RETURNS int(11)
-BEGIN
-	DECLARE whostage Integer;
-	SET whostage =0;
-    select who into whostage from (
-		select person_id, case mid(max(concat(obs_datetime, o.value_coded )),20)
-        when 1204 then 1
-when 1220 then 1
-when 1205 then 2
-when 1221 then 2
-when 1206 then 3
-when 1222 then 3
-when 1207 then 4
-when 1223 then 4
-        
-        end as who,
-        max(concat(obs_datetime,o.value_coded )) as test
-		from obs o
-		where o.voided =0 and o.concept_id in (160553,5356)
-		and date(obs_datetime)<= date(endDate) and o.person_id in (patient_id)
-		group by o.person_id
- )x;
-RETURN whostage;
-END
--- =============================== End of function definition =================
--- STARTING ART
--- ============================================================================
-select 'indicator 3' as ind, date_format(art_startDate, '%Y-%m') as cohort_month,
+-- next join
+
+left outer join (select 'indicator 3' as ind, date_format(art_startDate, '%Y-%m') as cohort_month,
 LAST_DAY(art_startDate) as endDate,
 -- who stage 1
 count(if(gender='F' and timestampdiff(year,birthdate, art_startDate) <=14 and whostage =1,person_id,null)) as 'K3-1-FP',
@@ -221,13 +192,11 @@ group by person_id
 where coalesce(active_status.ti_art_startDate,active_status.ti_Date) is null
 group by patient_id) x
 group by year(art_startDate), month(art_startDate) 
-order by year(art_startDate), month(art_startDate);
--- =================== end of the query =======================================
+order by year(art_startDate), month(art_startDate)) c using(endDate)
 
--- ============================================================================
--- Cummulative started 
--- ============================================================================
-select endDate,
+-- next Join
+
+left outer join (select endDate,
 'indicator 4' as ind,
 -- sub totals
 count(distinct if(gender='F' and timestampdiff(year,birthdate, art_startDate) <=14,person_id,null)) as 'K4-FP',
@@ -259,25 +228,11 @@ group by person_id
 ) active_status on active_status.person_id =o.patient_id
 where coalesce(active_status.ti_art_startDate,active_status.ti_Date) is null
 group by patient_id) t2 on art_startDate<=endDate
-group by endDate
-;
--- ======================== end of the query ==================================
+group by endDate) d using (endDate)
 
--- ====== Temporary table for cohort filters ==================================
-drop table if exists ke.dates;
-create table ke.dates (endDate datetime, startDate datetime);
-insert into dates (endDate, startDate)
-SELECT LAST_DAY(e.encounter_datetime) as endDate,
-date_sub(date_add(LAST_DAY(e.encounter_datetime),interval 1 DAY),interval 6 MONTH) as startDate
-from ke.encounter e
-group by year(e.encounter_datetime), month(e.encounter_datetime) 
-order by year(e.encounter_datetime), month(e.encounter_datetime);
+-- next Join
 
--- ====================== end of temporary table
--- ============================================================================
--- ON Prophylaxis (CTX and Fluconazole)
--- ============================================================================
-
+left outer join (
 select endDate, date_format(endDate,'%M-%Y')  as report_month,
 -- ctx
 count(distinct if(gender='F' and fluconazole=0 and timestampdiff(year,birthdate, endDate) <=14,person_id,null)) as 'K8-1-FP',
@@ -326,15 +281,63 @@ where o.concept_id in (162229, 1282) and o.voided=0 and o.value_coded in (1065,1
 group by o.person_id, month(o.obs_datetime)
 ) t2 on t2.ctx_date between date_sub(endDate, interval 3 month) and endDate
 	and (coalesce(date_died,to_date)  is null or coalesce(date_died, to_date)  = '' or coalesce(date_died,to_date) >endDate)
-group by endDate;
+group by endDate)e using (endDate)
 
--- ========================== Endo of Query ===================================
+-- next join
 
--- ============================================================================
--- Curnent on ART
--- ============================================================================
+left outer join (select endDate, date_format(endDate,'%M-%Y')  as report_month,
+-- ctx
+count(distinct if(gender='F' and fluconazole=0 and timestampdiff(year,birthdate, endDate) <=14,person_id,null)) as 'K8-1-FP',
+count(distinct if(gender='M' and fluconazole=0 and timestampdiff(year,birthdate, endDate) <=14,person_id,null)) as 'K8-1-MP',
+count(distinct if(gender='F' and fluconazole=0 and timestampdiff(year,birthdate, endDate) >14,person_id,null)) as 'K8-1-FA',
+count(distinct if(gender='M' and fluconazole=0 and timestampdiff(year,birthdate, endDate) >14,person_id,null)) as 'K8-1-MA',
+count(distinct if(gender='F' and fluconazole=0 ,person_id,null)) as 'K8-1-F',
+count(distinct if(gender='M' and fluconazole=0 ,person_id,null)) as 'K8-1-A',
+count(distinct if(fluconazole=0,person_id,null)) as 'K8-1-T',
+-- fluconazole
+count(distinct if(gender='F' and fluconazole=1 and timestampdiff(year,birthdate, endDate) <=14,person_id,null)) as 'K8-2-FP',
+count(distinct if(gender='M' and fluconazole=1 and timestampdiff(year,birthdate, endDate) <=14,person_id,null)) as 'K8-2-MP',
+count(distinct if(gender='F' and fluconazole=1 and timestampdiff(year,birthdate, endDate) >14,person_id,null)) as 'K8-2-FA',
+count(distinct if(gender='M' and fluconazole=1 and timestampdiff(year,birthdate, endDate) >14,person_id,null)) as 'K8-2-MA',
+count(distinct if(gender='F' and fluconazole=1 ,person_id,null)) as 'K8-2-F',
+count(distinct if(gender='M' and fluconazole=1 ,person_id,null)) as 'K8-2-A',
+count(distinct if(fluconazole=1,person_id,null)) as 'K8-2-T',
+-- sub total
+count(distinct if(gender='F'  and timestampdiff(year,birthdate, endDate) <=14,person_id,null)) as 'K8-3-FP',
+count(distinct if(gender='M'  and timestampdiff(year,birthdate, endDate) <=14,person_id,null)) as 'K8-3-MP',
+count(distinct if(gender='F'  and timestampdiff(year,birthdate, endDate) >14,person_id,null)) as 'K8-3-FA',
+count(distinct if(gender='M'  and timestampdiff(year,birthdate, endDate) >14,person_id,null)) as 'K8-3-MA',
+count(distinct if(gender='F', person_id,null)) as 'K8-3-F',
+count(distinct if(gender='M', person_id,null)) as 'K8-3-A',
+count(distinct person_id) as 'K8-3-T'
+	from dates t1
+	join (select o.person_id,p.gender, p.birthdate, date_format(o.obs_datetime, '%Y-%m') as ctx_month, 
+    max(date(o.obs_datetime)) as ctx_date,
+    max(if(o.value_coded=76488,1,0)) as fluconazole,
+active_status.*
+from obs o
+join person p on p.person_id=o.person_id and p.voided=0
+join patient_program pp on pp.patient_id = o.person_id and pp.voided = 0 and pp.program_id=2
+left outer join (
+-- subquery to transfer out and death status
+select 
+o.person_id as pid,
+max(if(o.concept_id=1543, o.value_datetime,null)) as date_died,
+max(if(o.concept_id=160649, o.value_datetime,null)) as to_date,
+max(if(o.concept_id=161555, o.value_coded,null)) as dis_reason
+from obs o
+where o.concept_id in (1543, 161555, 160649) and o.voided = 0 -- concepts for date_died, date_transferred out and discontinuation reason
+group by person_id
+) active_status on active_status.pid =o.person_id
+where o.concept_id in (162229, 1282) and o.voided=0 and o.value_coded in (1065,105281,74250,76488)
+group by o.person_id, month(o.obs_datetime)
+) t2 on t2.ctx_date between date_sub(endDate, interval 3 month) and endDate
+	and (coalesce(date_died,to_date)  is null or coalesce(date_died, to_date)  = '' or coalesce(date_died,to_date) >endDate)
+group by endDate) f using(endDate)
 
-select endDate, date_format(endDate,'%M-%Y')  as report_month,
+-- nex join
+
+left outer join (select endDate, date_format(endDate,'%M-%Y')  as report_month,
 -- Pregnant on arvs
 count(distinct if(gender='F' and pregnancy_status=1 and art_startDate is not null and timestampdiff(year,birthdate, endDate) <=14,person_id,null)) as 'K5-1-FP',
 count(distinct if(gender='F' and pregnancy_status=1 and art_startDate is not null and timestampdiff(year,birthdate, endDate) >14,person_id,null)) as 'K5-1-FA',
@@ -396,14 +399,11 @@ group by person_id
 where  o.voided=0
 group by o.person_id, month(o.obs_datetime)) t2 on t2.visit_date between date_sub(endDate, interval 3 month) and endDate
 	and (coalesce(date_died,to_date)  is null or coalesce(date_died, to_date)  = '' or coalesce(date_died,to_date) >endDate)
-group by endDate;
+group by endDate) g using (endDate)
 
--- ===================== end of query =========================================
+-- next join
 
--- ============================================================================
--- Elibility query
--- ============================================================================
-select endDate, date_format(endDate,'%M-%Y')  as report_month,
+left outer join (select endDate, date_format(endDate,'%M-%Y')  as report_month,
 -- sub total
 count(distinct if(gender='F'  and timestampdiff(year,birthdate, endDate) <=14,person_id,null)) as 'K6-FP',
 count(distinct if(gender='M'  and timestampdiff(year,birthdate, endDate) <=14,person_id,null)) as 'K6-MP',
@@ -482,6 +482,4 @@ where  o.voided=0
 group by o.person_id, month(o.obs_datetime)) x) t2 on t2.date_eligible between date_sub(endDate, interval 3 month) and endDate
 	and (coalesce(date_died,to_date)  is null or coalesce(date_died, to_date)  = '' or coalesce(date_died,to_date) >endDate)
     and t2.date_eligible is not null
-group by endDate;
-
--- ============================= End of the query =============================
+group by endDate) h using (endDate)
