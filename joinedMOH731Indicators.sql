@@ -303,6 +303,36 @@ order by period
 
 )
 
+union
+
+(
+
+select
+'HV02-35' as Indicator,
+date_format(e.encounter_datetime, '%Y-%M') as 'Month',
+extract(year_month from e.encounter_datetime) as period,
+(select count(*) from (
+select 
+p.person_id,
+p.birthdate as dob,
+datediff(o.obs_datetime, p.birthdate) as ageInDays,
+o.obs_datetime as encDate,
+o.concept_id,
+o.value_coded,
+max(if(o.concept_id = 1151 and o.value_coded= 6046, 1, 0)) as mixedFeeding
+from person p
+inner join obs o on o.person_id = p.person_id and o.concept_id in (1151)
+group by p.person_id, extract(year_month from o.obs_datetime)
+) x
+where extract(YEAR_MONTH from x.encDate) = period and x.mixedFeeding=1 and ageInDays between 179 and 215
+) monthlyCount
+from encounter e
+where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
+group by year(e.encounter_datetime), month(e.encounter_datetime)
+order by period
+
+)
+
 union 
 
 (
@@ -327,37 +357,6 @@ inner join obs o on o.person_id = p.person_id and o.concept_id in (1151)
 group by p.person_id, extract(year_month from o.obs_datetime)
 ) x
 where extract(YEAR_MONTH from x.encDate) = period and x.exclusiveBreastFeeding=1 and x.exclusiveReplacementFeeding=1 and x.mixedFeeding=1 and ageInDays between 179 and 215
-) monthlyCount
-from encounter e
-where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
-group by year(e.encounter_datetime), month(e.encounter_datetime)
-order by period
-
-)
-
-
-union
-
-(
-
-select
-'HV02-35' as Indicator,
-date_format(e.encounter_datetime, '%Y-%M') as 'Month',
-extract(year_month from e.encounter_datetime) as period,
-(select count(*) from (
-select 
-p.person_id,
-p.birthdate as dob,
-datediff(o.obs_datetime, p.birthdate) as ageInDays,
-o.obs_datetime as encDate,
-o.concept_id,
-o.value_coded,
-max(if(o.concept_id = 1151 and o.value_coded= 6046, 1, 0)) as mixedFeeding
-from person p
-inner join obs o on o.person_id = p.person_id and o.concept_id in (1151)
-group by p.person_id, extract(year_month from o.obs_datetime)
-) x
-where extract(YEAR_MONTH from x.encDate) = period and x.mixedFeeding=1 and ageInDays between 179 and 215
 ) monthlyCount
 from encounter e
 where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
@@ -514,6 +513,155 @@ from encounter e
 where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
 group by year(e.encounter_datetime), month(e.encounter_datetime)
 order by period
+)
+union
+-- TB Screening indicators
+(
+select Indicator, fperiod as 'Month', period, monthlyCount from (
+select 'HV03-50' as Indicator,
+date_format(e.encounter_datetime, '%Y-%M') as fPeriod,
+last_day(e.encounter_datetime) as lastDay,
+extract(year_month from e.encounter_datetime) as period,
+(select count(*) from (
+select 
+o.person_Id as person,
+p.gender as gender,
+p.birthdate as dob,
+enrolled.enrolmentDate,
+left(max(concat(o.obs_datetime, if(o.value_coded in (142177, 1661, 1660), 1, 0))),10) as Lastscreen,
+mid(max(concat(o.obs_datetime, if(o.value_coded in (142177, 1661, 1660), 1, 0))),20) as screened,
+mid(max(concat(o.obs_datetime, if(o.value_coded = 1662, 1, 0))),20) as onTreatment
+from obs o 
+inner join person p on p.person_id = o.person_id and p.voided=0
+inner join (
+select 
+e.patient_id as patient,
+date(min(e.encounter_datetime)) as enrolmentDate
+from encounter e
+where e.voided =0
+group by patient
+) enrolled on o.person_id = enrolled.patient
+where o.voided=0 and o.concept_id =1659  
+group by person, extract(year_month from o.obs_datetime)
+) x
+where extract(YEAR_MONTH from x.Lastscreen) = period and x.enrolmentDate <= lastDay and x.gender='M' and (datediff(lastDay, dob) div 365.25 < 15) and x.onTreatment =0 and x.screened =1 
+) monthlyCount
+from encounter e
+where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
+group by year(e.encounter_datetime), month(e.encounter_datetime)
+order by period
+) i
+)
+union
+(
+select Indicator, fperiod as 'Month', period, monthlyCount from (
+select 'HV03-52' as Indicator,
+date_format(e.encounter_datetime, '%Y-%M') as fPeriod,
+last_day(e.encounter_datetime) as lastDay,
+extract(year_month from e.encounter_datetime) as period,
+(select count(*) from (
+select 
+o.person_Id as person,
+p.gender as gender,
+p.birthdate as dob,
+enrolled.enrolmentDate,
+left(max(concat(o.obs_datetime, if(o.value_coded in (142177, 1661, 1660), 1, 0))),10) as Lastscreen,
+mid(max(concat(o.obs_datetime, if(o.value_coded in (142177, 1661, 1660), 1, 0))),20) as screened,
+mid(max(concat(o.obs_datetime, if(o.value_coded = 1662, 1, 0))),20) as onTreatment
+from obs o 
+inner join person p on p.person_id = o.person_id and p.voided=0
+inner join (
+select 
+e.patient_id as patient,
+date(min(e.encounter_datetime)) as enrolmentDate
+from encounter e
+where e.voided =0
+group by patient
+) enrolled on o.person_id = enrolled.patient
+where o.voided=0 and o.concept_id =1659  
+group by person, extract(year_month from o.obs_datetime)
+) x
+where extract(YEAR_MONTH from x.Lastscreen) = period and x.enrolmentDate <= lastDay and x.gender='M' and (datediff(lastDay, dob) div 365.25 >= 15) and x.onTreatment =0 and x.screened =1 
+) monthlyCount
+from encounter e
+where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
+group by year(e.encounter_datetime), month(e.encounter_datetime)
+order by period
+) i
+)
+union
+(
+select Indicator, fperiod as 'Month', period, monthlyCount from (
+select 'HV03-51' as Indicator,
+date_format(e.encounter_datetime, '%Y-%M') as fPeriod,
+last_day(e.encounter_datetime) as lastDay,
+extract(year_month from e.encounter_datetime) as period,
+(select count(*) from (
+select 
+o.person_Id as person,
+p.gender as gender,
+p.birthdate as dob,
+enrolled.enrolmentDate,
+left(max(concat(o.obs_datetime, if(o.value_coded in (142177, 1661, 1660), 1, 0))),10) as Lastscreen,
+mid(max(concat(o.obs_datetime, if(o.value_coded in (142177, 1661, 1660), 1, 0))),20) as screened,
+mid(max(concat(o.obs_datetime, if(o.value_coded = 1662, 1, 0))),20) as onTreatment
+from obs o 
+inner join person p on p.person_id = o.person_id and p.voided=0
+inner join (
+select 
+e.patient_id as patient,
+date(min(e.encounter_datetime)) as enrolmentDate
+from encounter e
+where e.voided =0
+group by patient
+) enrolled on o.person_id = enrolled.patient
+where o.voided=0 and o.concept_id =1659  
+group by person, extract(year_month from o.obs_datetime)
+) x
+where extract(YEAR_MONTH from x.Lastscreen) = period and x.enrolmentDate <= lastDay and x.gender='F' and (datediff(lastDay, dob) div 365.25 < 15) and x.onTreatment =0 and x.screened =1 
+) monthlyCount
+from encounter e
+where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
+group by year(e.encounter_datetime), month(e.encounter_datetime)
+order by period
+) i 
+)
+union
+(
+select Indicator, fperiod as 'Month', period, monthlyCount from (
+select 'HV03-53' as Indicator,
+date_format(e.encounter_datetime, '%Y-%M') as fPeriod,
+last_day(e.encounter_datetime) as lastDay,
+extract(year_month from e.encounter_datetime) as period,
+(select count(*) from (
+select 
+o.person_Id as person,
+p.gender as gender,
+p.birthdate as dob,
+enrolled.enrolmentDate,
+left(max(concat(o.obs_datetime, if(o.value_coded in (142177, 1661, 1660), 1, 0))),10) as Lastscreen,
+mid(max(concat(o.obs_datetime, if(o.value_coded in (142177, 1661, 1660), 1, 0))),20) as screened,
+mid(max(concat(o.obs_datetime, if(o.value_coded = 1662, 1, 0))),20) as onTreatment
+from obs o 
+inner join person p on p.person_id = o.person_id and p.voided=0
+inner join (
+select 
+e.patient_id as patient,
+date(min(e.encounter_datetime)) as enrolmentDate
+from encounter e
+where e.voided =0
+group by patient
+) enrolled on o.person_id = enrolled.patient
+where o.voided=0 and o.concept_id =1659  
+group by person, extract(year_month from o.obs_datetime)
+) x
+where extract(YEAR_MONTH from x.Lastscreen) = period and x.enrolmentDate <= lastDay and x.gender='F' and (datediff(lastDay, dob) div 365.25 >= 15) and x.onTreatment =0 and x.screened =1 
+) monthlyCount
+from encounter e
+where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
+group by year(e.encounter_datetime), month(e.encounter_datetime)
+order by period 
+) i
 )
 union 
 (
