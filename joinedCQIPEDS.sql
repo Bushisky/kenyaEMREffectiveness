@@ -1,3 +1,5 @@
+call create_flat_table_vl();
+
 -- ind 1.1
 (
 select '1.1' as Indicator, d.cohort_month as Period, n.sixMonthsTotal as Numerator, d.ActiveInCareTotal as Denominator
@@ -251,41 +253,30 @@ select
 	LAST_DAY(e.encounter_datetime) as endDate,
 	date_format(e.encounter_datetime, '%Y-%M') as yearMonth,
 	(
-select count(distinct patient) from (
-select distinct
-	o.person_id as patient,
-	o.value_numeric as val,
-	
-	o.obs_datetime as encDate,
-	active_status.date_died as date_died,
-	active_status.to_date as to_date,
-	p.birthdate
-from obs o
-join person p on p.person_id = o.person_id and p.voided=0 -- and p.dead = 0 -- filter dead
-left outer join (
--- subquery to transfer out and death status
-select 
-o.person_id,
-ifnull(max(if(o.concept_id=1543, o.value_datetime,null)), '') as date_died,
-ifnull(max(if(o.concept_id=160649, o.value_datetime,null)), '') as to_date,
-ifnull(max(if(o.concept_id=161555, o.value_coded,null)), '') as dis_reason
-from obs o
-where o.concept_id in (1543, 161555, 160649) and o.voided = 0 -- concepts for date_died, date_transferred out and discontinuation reason
-group by person_id
-) active_status on active_status.person_id =o.person_id
-where o.voided=0 and o.concept_id in (5497, 730) 
-group by patient, encDate
-) cd4
-where cd4.encDate between startDate and endDate and (cd4.date_died is null or cd4.date_died='' or cd4.date_died > endDate)
-and (cd4.to_date is null or cd4.to_date='' or cd4.to_date > endDate) -- date_died must be after reporting period
-and timestampdiff(year,cd4.birthdate, endDate) < 15 and isActive(cd4.patient, endDate)=1
+select count(distinct patient_id) from (
+select patient_id, 
+left(max(concat(visit_date, tca_date)), 10) as visit_date,
+mid(max(concat(visit_date, tca_date)), 11) as tca_date,
+mid(max(concat(visit_date, date_to)),11) as date_to,
+mid(max(concat(visit_date, date_died)),11) as date_died,
+dob,
+cd4_percent,
+cd4_count
+from flat_visit_table_vl f
+where  cd4_percent is not null or cd4_count is not null
+group by patient_id, visit_date ) cd4
+where visit_date between startDate and endDate 
+and (datediff(endDate, date(visit_date)) <= 96 or datediff(endDate, date(tca_date)) <= 96) 
+and (date_died is null or date_died='' or date_died > endDate)
+and (date_to is null or date_to='' or date_to > endDate)
+and timestampdiff(year,dob, endDate) < 15
 ) as monthTotal
 from encounter e
 where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
 group by year(e.encounter_datetime), month(e.encounter_datetime)
 
 ) n on n.yearMonth = d.cohort_month
-order by 1ss
+order by 1
 )
 union
 -- 1.4 at least a viral load result in the last 12 months
@@ -389,39 +380,26 @@ select
 	LAST_DAY(e.encounter_datetime) as endDate,
 	date_format(e.encounter_datetime, '%Y-%M') as yearMonth,
 	(
-select count(distinct patient) from (
-select distinct
-	o.person_id as patient,
-	o.value_numeric as val,
-	o.obs_datetime as encDate,
-	active_status.date_died as date_died,
-	active_status.to_date as to_date,
-	p.birthdate
-from obs o
-join person p on p.person_id = o.person_id and p.voided=0 -- and p.dead = 0 -- filter dead
-left outer join (
--- subquery to transfer out and death status
-select 
-o.person_id,
-ifnull(max(if(o.concept_id=1543, o.value_datetime,null)), '') as date_died,
-ifnull(max(if(o.concept_id=160649, o.value_datetime,null)), '') as to_date,
-ifnull(max(if(o.concept_id=161555, o.value_coded,null)), '') as dis_reason
-from obs o
-where o.concept_id in (1543, 161555, 160649) and o.voided = 0 -- concepts for date_died, date_transferred out and discontinuation reason
-group by person_id
-) active_status on active_status.person_id =o.person_id
-where o.voided=0 and o.concept_id = 856 
-group by patient, encDate
-) vl
-where vl.encDate between startDate and endDate and (vl.date_died is null or vl.date_died='' or vl.date_died > endDate)
-and (vl.to_date is null or vl.to_date='' or vl.to_date > endDate) -- date_died must be after reporting period
-and timestampdiff(year,vl.birthdate, endDate) < 15
-and isActive(patient, endDate)=1
+select count(distinct patient_id) from (
+select patient_id, 
+left(max(concat(visit_date, tca_date)), 10) as visit_date,
+mid(max(concat(visit_date, tca_date)), 11) as tca_date,
+mid(max(concat(visit_date, date_to)),11) as date_to,
+mid(max(concat(visit_date, date_died)),11) as date_died,
+dob,
+vl
+from flat_visit_table_vl f
+where  vl is not null
+group by patient_id, visit_date ) vl
+where visit_date between startDate and endDate 
+and (datediff(endDate, date(visit_date)) <= 96 or datediff(endDate, date(tca_date)) <= 96) 
+and (date_died is null or date_died='' or date_died > endDate)
+and (date_to is null or date_to='' or date_to > endDate)
+and timestampdiff(year,dob, endDate) < 15
 ) as monthTotal
 from encounter e
 where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
 group by year(e.encounter_datetime), month(e.encounter_datetime)
-
 ) n on n.yearMonth = d.cohort_month
 order by 1
 )
@@ -528,39 +506,25 @@ select
 	date_format(e.encounter_datetime, '%Y-%M') as yearMonth,
 	(
 select count(distinct patient_id) from (
-select 
-od.patient_id, 
-p.birthdate as dob,
-min(date(od.start_date)) as date_start_art,
-a_s.date_died,
-a_s.to_date 
-from orders od 
-inner join person p on p.person_id = od.patient_id and p.voided =0
-left outer join (
--- subquery to transfer out and death status
-select 
-o.person_id,
-ifnull(max(if(o.concept_id=1543, o.value_datetime,null)), '') as date_died,
-ifnull(max(if(o.concept_id=160649, o.value_datetime,null)), '') as to_date,
-ifnull(max(if(o.concept_id=161555, o.value_coded,null)), '') as dis_reason
-from obs o
-where o.concept_id in (1543, 161555, 160649) and o.voided = 0 -- concepts for date_died, date_transferred out and discontinuation reason
-group by person_id
-) a_s on a_s.person_id =od.patient_id
--- include people with vl tests
-inner join 
-(
-select distinct person_id 
-from obs 
-where concept_id = 856 and voided=0
-) vl on vl.person_id = od.patient_id
-where od.voided=0 
-group by od.patient_id
-) ds
-where datediff(endDate, ds.date_start_art) >=186 and lastViralLoad(ds.patient_id, endDate) < 1000 and isActive(ds.patient_id, endDate)=1
-and (ds.date_died is null or ds.date_died='' or ds.date_died > endDate)
-and (ds.to_date is null or ds.to_date='' or ds.to_date > endDate) -- date_died must be after reporting period
-and timestampdiff(year,ds.dob, endDate) < 15
+select patient_id, 
+min(art_start_date) as art_start_date,
+min(ti_art_start_date) ti_art_start_date,
+left(max(concat(visit_date, tca_date)), 10) as visit_date,
+mid(max(concat(visit_date, tca_date)), 11) as tca_date,
+mid(max(concat(visit_date, date_to)),11) as date_to,
+mid(max(concat(visit_date, date_died)),11) as date_died,
+mid(max(concat(visit_date, vl)),11) as vl,
+dob
+from flat_visit_table_vl f
+where  vl is not null
+group by patient_id, visit_date ) vl
+where visit_date between startDate and endDate 
+and (datediff(endDate, date(visit_date)) <= 96 or datediff(endDate, date(tca_date)) <= 96) 
+and (date_died is null or date_died='' or date_died > endDate)
+and (date_to is null or date_to='' or date_to > endDate)
+and timestampdiff(year,dob, endDate) < 15
+and vl > 1000
+and timestampdiff(month,if(ti_art_start_date is not null, least(ti_art_start_date, art_start_date), art_start_date), endDate) >= 6
 ) as monthTotal
 from encounter e
 where e.voided =0 and e.encounter_datetime between '1980-01-01' and curdate()
