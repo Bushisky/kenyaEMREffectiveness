@@ -6,6 +6,7 @@ DECLARE rowCount  INT;
 SET rowCount = 1000000;
 drop table if exists flat_visit_table_vl;
 
+
 create table flat_visit_table_vl(
 id int(11) not null auto_increment,
 visit_id int(11) default null,
@@ -28,10 +29,40 @@ date_died date default null,
 date_to date default null,
 primary key(id),
 index(patient_id),
+index(visit_id),
+index(visit_date),
+index(tca_date),
+index(art_start_date),
+index(cd4_count, cd4_percent),
+index(date_died,date_to),
 constraint foreign key(patient_id) references patient(patient_id)
 
 )
 ;
+
+
+insert into flat_visit_table_vl (visit_date, patient_id, gender, dob)
+select date(e.encounter_datetime), e.patient_id, p.gender, p.birthdate
+from encounter e
+inner join person p on p.person_id=e.patient_id and p.voided=0
+where e.voided = 0 and e.encounter_type not in (4,5,6,9,11) -- (1,3,5,6,7,10,11,12,13,14,15,16,17)
+group by e.patient_id, date(e.encounter_datetime)
+order by e.patient_id asc, date(e.encounter_datetime) asc
+;
+
+update flat_visit_table_vl f
+left outer join (
+select 
+od.patient_id,
+min(od.start_date) as art_start_date 
+from orders od
+inner join concept_set cs on od.concept_id = cs.concept_id and cs.concept_set = 1085
+where od.voided=0
+group by 1
+) art on f.patient_id = art.patient_id
+set f.art_start_date=art.art_start_date
+;
+
 
 
 insert into flat_visit_table_vl (visit_date, patient_id, gender, dob,art_start_date)
@@ -47,7 +78,7 @@ inner join concept_set cs on od.concept_id = cs.concept_id and cs.concept_set = 
 where od.voided=0
 group by 1
 ) art on art.patient_id = e.patient_id
-where e.voided = 0 and e.encounter_type not in (2,4,5,9,20)
+where e.voided = 0 and e.encounter_type not in (1,3,5,6,7,10,11,12,13,14,15,16,17)
 group by e.patient_id, date(e.encounter_datetime)
 order by e.patient_id asc, date(e.encounter_datetime) asc
 ;
