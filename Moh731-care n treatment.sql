@@ -342,3 +342,72 @@ and (coalesce(date_died,to_date) >endDate or coalesce(date_died,to_date) is null
 and (coalesce(arv_date, ti_art_startDate) is not null and arv_date <=endDate)
 group by endDate
 -- ================= end of active on art query ===============================
+-- ============================================================================
+-- Net cohort query
+-- ============================================================================
+select date(t1.endDate) as endDate, date_format(endDate,'%M-%Y')  as report_month,
+count(distinct patient_id) as 'HV03-45',
+count(distinct if (reg_discontinued = 0,patient_id,null)) as 'HV03-46',
+count(distinct if (reg_discontinued = 1,patient_id,null)) as 'HV03-47'
+from dates t1
+left outer join (select  ec.patient_id, active_status.*, 
+p.dead,
+p.gender,
+p.birthdate,
+art_status.*,
+-- right(max(concat(ec.encounter_datetime, o.value_datetime)),19) as tca, 
+max(date(ec.encounter_datetime)) as visit_date, date_format(max(ec.encounter_datetime),'%Y-%m') as visit_month
+from encounter ec 
+join person p on p.person_id = ec.patient_id and p.voided=0 -- and p.dead = 0 -- filter dead
+join patient_program pp on pp.patient_id = ec.patient_id and pp.voided = 0 and pp.program_id=2
+left outer join (
+-- art status
+-- art status
+select coalesce(t1.patient_id,t2.person_id) as id,
+min(coalesce(t1.arv_date,t2.arv_date)) as arv_date,
+coalesce(t1.reg,t2.reg) as reg,
+discontinued as reg_discontinued
+from (
+select patient_id, group_concat(cn.name) as reg, max(start_date) as arv_date, discontinued, o.discontinued_reason,
+group_concat(cn.concept_id)
+from orders o
+join concept_name cn on cn.concept_id=o.concept_id and cn.voided=0 and cn.concept_name_type='SHORT'
+where o.voided =0
+group by patient_id
+)t1
+left outer join(
+select person_id, min(obs_datetime) as arv_date, o.concept_id,group_concat(value_coded),group_concat(cn.name) as reg
+from obs o
+left outer join concept_name cn on cn.concept_id=o.value_coded and cn.voided=0 and cn.concept_name_type='SHORT'
+where (o.concept_id in (1282) and 
+value_coded in (1149,80586,1652,161364,75523,78643,78643,70056,84795.161361,794,792,86663,103166,630,160124,84309,817))
+or o.concept_id in (930,1088)
+and o.voided =0
+group by person_id) t2 on t2.person_id = t1.patient_id
+group by t1.patient_id
+order by t1.arv_date
+) art_status on art_status.id = ec.patient_id
+
+left outer join (
+-- subquery to transfer out and death status
+select 
+o.person_id,
+max(if(o.concept_id=1543, o.value_datetime,null)) as date_died,
+max(if(o.concept_id=160649, o.value_datetime,null)) as to_date,
+max(if(o.concept_id=161555, o.value_coded,null)) as dis_reason,
+min(if(o.concept_id=159599, o.value_datetime,null)) as ti_art_startDate,
+min(if(o.concept_id=160534, o.value_datetime,null)) as ti_Date
+from obs o
+where o.concept_id in (1543, 161555, 160649, 159599, 160534) and o.voided = 0 -- concepts for date_died, date_transferred out and discontinuation reason
+group by person_id
+
+) active_status on active_status.person_id =ec.patient_id
+where ec.encounter_type not in  (2,4,6,12)
+group by ec.patient_id, month(ec.encounter_datetime)
+order by ec.patient_id, date(ec.encounter_datetime) asc
+) t2 on t2.arv_date between date_sub(date_add(date_sub(endDate, interval 1 month), interval 1 day), interval 1 year)
+and 
+date_sub(endDate, interval 1 year)
+and (coalesce(date_died,to_date) >endDate or coalesce(date_died,to_date) is null)
+group by endDate;
+-- ==========================end of query =====================================
